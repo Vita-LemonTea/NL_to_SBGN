@@ -1,13 +1,10 @@
 # Import necessary packages
 import scispacy
 import spacy
-from spacy import displacy
 from nltk.corpus import wordnet
 
 import libsbgnpy.libsbgn as libsbgn
 from libsbgnpy.libsbgnTypes import Language, GlyphClass, ArcClass, Orientation
-
-import tempfile
 
 # Load the NLP model
 nlp = spacy.load("en_ner_bionlp13cg_md")
@@ -28,14 +25,24 @@ insight into the different role monocytes and T-cells play in HIV pathogenesis.
 
 text2 = """Glucose and ATP produce glucose-6P and ADP."""
 
+text3 = """Glucose and ATP produce glucose-6P and ADP, which is catalyzed by hexokinase. 
+glucose-6P produce fructose-6P, which is catalyzed by glucose-6P-isomerase.
+fructose-6P and ATP-1 produce ADP-1 and fructose-1.6P, which is catalyzed by phosphofructokinase."""
+
+text4 = """fructose-1.6p produce DHA-P and GA-3P, which is catalyzed by aldolase. 
+DHA-P transfer to GA-3P, which is catalyzed by trios-P-isomerase. 
+GA-3P, Pi, and NAD can produce 1.3-BPG, NADH, and H+, which is catalyzed by the GAPDH.
+1.3-BPG and ADP produce ATP and 3-PG, which is catalyzed by PGK1."""
+
+text5 = """acetyl-CoA and choline produce ACh, which is catalyzed by ChAT. ACh produce synaptic-vesicle-ACh, which is stimulated by the vAChT. The synaptic-vesicle-ACh produce synaptic-cleft-ACh, which is stimulated by SNARE. The synaptic-cleft-ACh produce acetate and synaptic-cleft-choline, which is catalyzed by AChE. The synaptic-cleft-choline produce choline, which is stimulated by CHT1."""
+
+text6 = """acetyl-CoA and choline produce ACh, which is catalyzed by ChAT. ACh produce synaptic-vesicle-ACh, which is stimulated by vAChT. The synaptic-vesicle-ACh produce synaptic-cleft-ACh, which is stimulated by SNARE. synaptic-cleft-ACh produce acetate and synaptic-cleft-choline, which is catalyzed by AChE. synaptic-cleft-choline produce choline, which is stimulated by CHT1. closed-nAChR produce open-nAChR, which is stimulated by synaptic-cleft-ACh. ER-Ca2+ produce Ca2+, which is stimulated by open-nAChR. myosin and ATP produce myosin-ATP. myosin-ATP and actin produce actin-myosin-ATP. actin-myosin-ATP produce tense-actin-myosin, ADP, and Pi. tense-actin-myosin produce myosin and actin."""
+
 # Apply NLP model
-doc = nlp(text2)
+doc = nlp(text5)
 
 # Examine the entities extracted by the mention detector.
 print(list(doc.ents))
-
-displacy.render(doc, style='ent', jupyter=True)
-displacy.render(next(doc.sents), style='dep', jupyter=True)
 
 # Extract entities from doc
 ent_bc = {}
@@ -70,6 +77,7 @@ for a in ent_bc:
     else:
         sbgn_glyph = GlyphClass.ENTITY
 
+    # entities and their IDs
     ent_dic[a] = 'glyph'+str(gn)
 
     g = libsbgn.glyph(class_=sbgn_glyph, id='glyph'+str(gn))
@@ -79,6 +87,7 @@ for a in ent_bc:
 
     gn = gn + 1
 
+print(ent_dic)
 # Dependency extraction and create arcs
 sentences = list(doc.sents)
 pn = 1
@@ -97,6 +106,7 @@ for sentence in sentences:
 
     subj = []
     obj = []
+    apd = []
     for child in root_token.children:
         if child.dep_ == 'nsubj':
             subj.append(child)
@@ -108,7 +118,15 @@ for sentence in sentences:
             for subchild in child.children:
                 if subchild.dep_ == 'conj':
                     obj.append(subchild)
+                if subchild.dep_ == 'acl:relcl':
+                    apd_arc = subchild
+                    for subsubchild in subchild.children:
+                        if subsubchild.dep_ == 'nmod':
+                            apd.append(subsubchild)
+
+
     synonyms = []
+    apd_synonyms = []
     arc_names = ['consume', 'produce', 'modulate', 'stimulate', 'catalyze', 'inhibit']
     arc_dic = {'consume': ArcClass.CONSUMPTION,
                'produce': ArcClass.PRODUCTION,
@@ -134,6 +152,20 @@ for sentence in sentences:
     else:
         sub_subgn_arc = sbgn_arc
 
+
+    for syn in wordnet.synsets(str(apd_arc)):
+        for l in syn.lemmas():
+            apd_synonyms.append(l.name())
+
+    apd_arc_name = list(set(apd_synonyms).intersection(set(arc_names)))
+
+    if apd_arc_name:
+        apd_sbgn_arc = arc_dic[apd_arc_name[0]]
+        print(pn)
+        print(apd_arc_name[0])
+    else:
+        apd_sbgn_arc = ArcClass.UNKNOWN_INFLUENCE
+
     for sub in subj:
         a = libsbgn.arc(class_=sub_subgn_arc, source=ent_dic[str(sub)], target='pn'+str(pn)+'.1', id="a" + str(an))
         a.set_start(libsbgn.startType(x=98, y=160))
@@ -148,10 +180,14 @@ for sentence in sentences:
         map.add_arc(a)
         an = an + 1
 
+    for ap in apd:
+        a = libsbgn.arc(class_=apd_sbgn_arc, source=ent_dic[str(ap)], target='pn'+str(pn), id="a" + str(an))
+        a.set_start(libsbgn.startType(x=98, y=160))
+        a.set_end(libsbgn.endType(x=136, y=180))
+        map.add_arc(a)
+        an = an + 1
+
     pn = pn + 1
 
 # write SBGN to file
-sbgn.write_file('E:/test.sbgn')
-
-# from libsbgnpy import render
-# render.render_sbgn(sbgn,'E:/test.png')
+sbgn.write_file('E:/test3.sbgn')
